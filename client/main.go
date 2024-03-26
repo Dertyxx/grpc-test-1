@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/your_username/your_project_name/person"
+	"https://github.com/Dertyxx/grpc-test-1/proto"
 )
 
 func main() {

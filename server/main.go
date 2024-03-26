@@ -6,67 +6,85 @@ import (
 	"log"
 	"net"
 
+	pb "github.com/Dertyxx/grpc-test-1/proto" // Replace with your package name
 	"google.golang.org/grpc"
-
-	"github.com/your_username/your_project_name/person"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-type server struct{}
-
-var persons []*person.Person
-
-func (s *server) CreatePerson(ctx context.Context, req *person.CreatePersonRequest) (*person.CreatePersonResponse, error) {
-	p := req.GetPerson()
-	persons = append(persons, p)
-	return &person.CreatePersonResponse{Person: p}, nil
+type server struct {
+	pb.UnimplementedPersonServiceServer
+	people map[string]*pb.Person
 }
 
-func (s *server) GetPerson(ctx context.Context, req *person.GetPersonRequest) (*person.GetPersonResponse, error) {
-	firstName := req.GetFirstName()
-	for _, p := range persons {
-		if p.FirstName == firstName {
-			return &person.GetPersonResponse{Person: p}, nil
-		}
+func (s *server) CreatePerson(ctx context.Context, req *pb.CreatePersonRequest) (*pb.CreatePersonResponse, error) {
+	person := req.GetPerson()
+	if person.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "ID is required")
 	}
-	return nil, fmt.Errorf("person with first name %s not found", firstName)
-}
 
-func (s *server) UpdatePerson(ctx context.Context, req *person.UpdatePersonRequest) (*person.UpdatePersonResponse, error) {
-	firstName := req.GetFirstName()
-	updatedPerson := req.GetUpdatedPerson()
-
-	for i, p := range persons {
-		if p.FirstName == firstName {
-			persons[i] = updatedPerson
-			return &person.UpdatePersonResponse{UpdatedPerson: updatedPerson}, nil
-		}
+	if _, exists := s.people[person.GetId()]; exists {
+		return nil, status.Error(codes.AlreadyExists, "Person with ID already exists")
 	}
-	return nil, fmt.Errorf("person with first name %s not found", firstName)
+
+	s.people[person.GetId()] = person
+	return &pb.CreatePersonResponse{Person: person}, nil
 }
 
-func (s *server) GetAllPersons(ctx context.Context, req *person.GetAllPersonsRequest) (*person.GetAllPersonsResponse, error) {
-	return &person.GetAllPersonsResponse{Persons: persons}, nil
-}
-
-func (s *server) DeletePerson(ctx context.Context, req *person.DeletePersonRequest) (*person.DeletePersonResponse, error) {
-	firstName := req.GetFirstName()
-	for i, p := range persons {
-		if p.FirstName == firstName {
-			persons = append(persons[:i], persons[i+1:]...)
-			return &person.DeletePersonResponse{Success: true}, nil
-		}
+func (s *server) ReadPerson(ctx context.Context, req *pb.ReadPersonRequest) (*pb.ReadPersonResponse, error) {
+	id := req.GetId()
+	person, ok := s.people[id]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "Person not found")
 	}
-	return nil, fmt.Errorf("person with first name %s not found", firstName)
+
+	return &pb.ReadPersonResponse{Person: person}, nil
+}
+
+func (s *server) UpdatePerson(ctx context.Context, req *pb.UpdatePersonRequest) (*pb.UpdatePersonResponse, error) {
+	person := req.GetPerson()
+	id := person.GetId()
+
+	_, ok := s.people[id]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "Person not found")
+	}
+
+	s.people[id] = person
+	return &pb.UpdatePersonResponse{Person: person}, nil
+}
+
+func (s *server) GetAllPersons(ctx context.Context, req *pb.GetAllPersonsRequest) (*pb.GetAllPersonsResponse, error) {
+	people := make([]*pb.Person, 0, len(s.people))
+	for _, p := range s.people {
+		people = append(people, p)
+	}
+	return &pb.GetAllPersonsResponse{Persons: people}, nil
+}
+
+func (s *server) DeletePerson(ctx context.Context, req *pb.DeletePersonRequest) (*pb.DeletePersonResponse, error) {
+	id := req.GetId()
+	_, ok := s.people[id]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "Person not found")
+	}
+
+	delete(s.people, id)
+	return &pb.DeletePersonResponse{Success: true}, nil
 }
 
 func main() {
+	fmt.Println("gRPC server running...")
+
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+
 	s := grpc.NewServer()
-	person.RegisterPersonServiceServer(s, &server{})
-	log.Println("Server started at port 50051...")
+	pb.RegisterPersonServiceServer(s, &server{people: make(map[string]*pb.Person)})
+
+	log.Printf("Server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
